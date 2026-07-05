@@ -103,7 +103,7 @@ The `WLXHarness/` directory contains a standalone test harness (contributed by N
 
 ## How It Works
 
-MDView is a WLX lister plugin — a DLL that Total Commander loads when you press F3 on a matching file type. It contains a built-in Markdown-to-HTML converter and embeds an MSHTML (IE11) WebBrowser control to render the output. The rendered HTML is written to a temporary file in the same directory as the source `.md` file, allowing local relative image paths to resolve correctly via the Local Machine security zone. The split source view uses a Windows RichEdit control with synchronised ratio-based scrolling. Keyboard input is handled by subclassing the browser's internal window and (when active) the RichEdit control. Settings are persisted via TC's standard INI file mechanism.
+MDView is a WLX lister plugin — a DLL that Total Commander loads when you press F3 on a matching file type. It contains a built-in Markdown-to-HTML converter and embeds an MSHTML (IE11) WebBrowser control to render the output. The rendered HTML is written to a temporary file in the system temp directory, and a `<base>` tag is added so that local relative image paths still resolve correctly against the source `.md` directory. The split source view uses a Windows RichEdit control with synchronised ratio-based scrolling. Keyboard input is handled by subclassing the browser's internal window and (when active) the RichEdit control. Settings are persisted via TC's standard INI file mechanism.
 
 ## Credits
 

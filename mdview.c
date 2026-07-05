@@ -1598,43 +1598,107 @@ static HRESULT create_browser(HWND hwnd, IWebBrowser2** ppB, IOleObject** ppO, S
     *ppB=pB; *ppO=pO; return S_OK;
 }
 
+/* Build a <base> tag pointing to the source markdown directory so that
+   relative image/link URLs still resolve after the temp file is moved. */
+static char* dir_to_base_tag(const WCHAR* dir) {
+    if (!dir || !dir[0]) return NULL;
+    int len = WideCharToMultiByte(CP_UTF8, 0, dir, -1, NULL, 0, NULL, NULL);
+    if (len <= 0) return NULL;
+    char* path = (char*)malloc((size_t)len);
+    if (!path) return NULL;
+    WideCharToMultiByte(CP_UTF8, 0, dir, -1, path, len, NULL, NULL);
+    size_t pl = strlen(path);
+    int need_slash = (pl == 0 || (path[pl-1] != '\\' && path[pl-1] != '/'));
+    size_t tag_size = pl + 64 + (need_slash ? 1 : 0);
+    char* tag = (char*)malloc(tag_size);
+    if (!tag) { free(path); return NULL; }
+    for (size_t i = 0; i < pl; i++) {
+        if (path[i] == '\\') path[i] = '/';
+    }
+    snprintf(tag, tag_size, "<base href=\"file:///%s%s\">", path, need_slash ? "/" : "");
+    free(path);
+    return tag;
+}
+
+/* Insert a string immediately before the first </head> tag. */
+static char* insert_before_head_end(const char* html, const char* insert) {
+    const char* head_end = strstr(html, "</head>");
+    if (!head_end || !insert || !insert[0]) {
+        size_t len = strlen(html);
+        char* copy = (char*)malloc(len + 1);
+        if (copy) memcpy(copy, html, len + 1);
+        return copy;
+    }
+    size_t before = (size_t)(head_end - html);
+    size_t inslen = strlen(insert);
+    size_t after = strlen(head_end);
+    char* out = (char*)malloc(before + inslen + after + 1);
+    if (!out) {
+        size_t len = strlen(html);
+        char* copy = (char*)malloc(len + 1);
+        if (copy) memcpy(copy, html, len + 1);
+        return copy;
+    }
+    memcpy(out, html, before);
+    memcpy(out + before, insert, inslen);
+    memcpy(out + before + inslen, head_end, after + 1);
+    return out;
+}
+
 static void navigate_to_html(IWebBrowser2* pB, const char* html, const WCHAR* dir, WCHAR* outTempPath) {
     outTempPath[0] = 0;
 
-    /* Write HTML to a temp file in the same directory as the .md file.
-       This makes MSHTML load in the Local Machine zone so file:// images work. */
-    WCHAR tempPath[MAX_PATH];
-    wcscpy(tempPath, dir);
-    /* Append a unique temp filename */
-    WCHAR tempName[64];
-    wsprintfW(tempName, L"_mdview_%08x.html", GetTickCount());
-    wcscat(tempPath, tempName);
+    /* Add a <base> tag so relative URLs resolve against the markdown directory. */
+    char* base_tag = dir_to_base_tag(dir);
+    char* final_html = insert_before_head_end(html, base_tag ? base_tag : "");
+    if (base_tag) free(base_tag);
 
-    /* Write UTF-8 HTML with BOM and Mark of the Web */
-    FILE* tf = _wfopen(tempPath, L"wb");
-    if (tf) {
-        /* UTF-8 BOM */
-        fputc(0xEF, tf); fputc(0xBB, tf); fputc(0xBF, tf);
-        /* Mark of the Web — tells MSHTML to allow script execution in local files */
-        fprintf(tf, "<!-- saved from url=(0016)http://localhost -->\r\n");
-        fwrite(html, 1, strlen(html), tf);
-        fclose(tf);
-        wcscpy(outTempPath, tempPath);
-
-        /* Navigate to the temp file */
-        VARIANT ve; VariantInit(&ve);
-        BSTR url = SysAllocString(tempPath);
-        IWebBrowser2_Navigate(pB, url, &ve, &ve, &ve, &ve);
-        SysFreeString(url);
-
-        /* Wait for load */
-        READYSTATE rs; int to = 200;
-        do { MSG msg; while(PeekMessageW(&msg,NULL,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}
-            IWebBrowser2_get_ReadyState(pB,&rs);
-            if(rs!=READYSTATE_COMPLETE) Sleep(10);
-        } while(rs!=READYSTATE_COMPLETE && --to>0);
-        return;
+    /* Build a unique temp file path in the system temp directory. */
+    WCHAR tempPath[MAX_PATH] = {0};
+    int have_temp = 0;
+    DWORD gp = GetTempPathW(MAX_PATH, tempPath);
+    if (gp && gp <= MAX_PATH) {
+        size_t tlen = wcslen(tempPath);
+        if (tlen > 0 && tempPath[tlen-1] != L'\\' && tempPath[tlen-1] != L'/') {
+            if (tlen < MAX_PATH - 1) { wcscat(tempPath, L"\\"); tlen++; }
+        }
+        WCHAR tempName[64];
+        wsprintfW(tempName, L"_mdview_%08x_%u.html", GetTickCount(), GetCurrentProcessId());
+        if (tlen + wcslen(tempName) < MAX_PATH) {
+            wcscat(tempPath, tempName);
+            have_temp = 1;
+        }
     }
+
+    if (have_temp) {
+        FILE* tf = _wfopen(tempPath, L"wb");
+        if (tf) {
+            /* UTF-8 BOM */
+            fputc(0xEF, tf); fputc(0xBB, tf); fputc(0xBF, tf);
+            /* Mark of the Web — tells MSHTML to allow script execution in local files */
+            fprintf(tf, "<!-- saved from url=(0016)http://localhost -->\r\n");
+            fwrite(final_html, 1, strlen(final_html), tf);
+            fclose(tf);
+            free(final_html);
+            wcscpy(outTempPath, tempPath);
+
+            /* Navigate to the temp file */
+            VARIANT ve; VariantInit(&ve);
+            BSTR url = SysAllocString(tempPath);
+            IWebBrowser2_Navigate(pB, url, &ve, &ve, &ve, &ve);
+            SysFreeString(url);
+
+            /* Wait for load */
+            READYSTATE rs; int to = 200;
+            do { MSG msg; while(PeekMessageW(&msg,NULL,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}
+                IWebBrowser2_get_ReadyState(pB,&rs);
+                if(rs!=READYSTATE_COMPLETE) Sleep(10);
+            } while(rs!=READYSTATE_COMPLETE && --to>0);
+            return;
+        }
+    }
+
+    free(final_html);
 
     /* Fallback: about:blank + document.write (no local image support) */
     VARIANT ve; VariantInit(&ve);
@@ -1816,7 +1880,7 @@ __declspec(dllexport) HWND __stdcall ListLoadW(HWND pw, WCHAR* file, int flags) 
     layout_views(data);
     IWebBrowser2_put_Silent(data->pBrowser, VARIANT_TRUE);
 
-    /* Extract directory from file path for temp file placement */
+    /* Extract directory from file path for the <base> tag */
     WCHAR fileDir[MAX_PATH];
     wcsncpy(fileDir, file, MAX_PATH); fileDir[MAX_PATH-1]=0;
     WCHAR* lastSep = wcsrchr(fileDir, L'\\');
