@@ -261,9 +261,18 @@ This is a reference-style image:
 
 ![Placeholder][sample-img]
 
+This is a local image loaded from the same directory as this markdown file. It should render correctly even though the temp HTML file is created in the system temp directory, because a `<base>` tag points back at this directory:
+
+![Local image](test_local.png)
+
+This is a reference-style local image:
+
+![Local reference image][local-img]
+
 This is an implicit reference link to [Google].
 
 [md-guide]: https://www.markdownguide.org "Official Markdown Guide"
 [sample-img]: https://placehold.co/200x100.png "A test placeholder"
+[local-img]: test_local.png "Local test image"
 [Google]: https://www.google.com "Google Search"
 
