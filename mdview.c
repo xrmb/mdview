@@ -1509,7 +1509,6 @@ static void build_js(StrBuf* sb) {
     /* Init */
     "window.onload=function(){"
     "shAll();initCollapse();"
-    "shAll();initCollapse();"
     "if(ln)tl();"  /* apply line numbers if saved */
     "up()};"
     "</script>");
