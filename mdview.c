@@ -270,11 +270,24 @@ static wchar_t* utf8_to_wide_dup(const char* s) {
     return w;
 }
 
+/* Forward a key message to the Lister window (parent of our container) so
+   Total Commander can handle its own view-mode shortcuts (1-7 etc.) */
+static void forward_key_to_lister(MDViewData* d, WPARAM wP, LPARAM lP)
+{
+    HWND w = d ? GetParent(d->hwndContainer) : NULL;
+    if (w) PostMessageW(w, WM_KEYDOWN, wP, lP);
+}
+
 static LRESULT CALLBACK TextViewSubclassProc(HWND hwnd, UINT msg, WPARAM wP, LPARAM lP) {
     MDViewData* d = (MDViewData*)GetPropW(hwnd, L"MDViewData");
     if (!d) return DefWindowProcW(hwnd, msg, wP, lP);
     if (msg == WM_KEYDOWN) {
         int ctrl = GetKeyState(VK_CONTROL) & 0x8000;
+        int alt = GetKeyState(VK_MENU) & 0x8000;
+        if (!ctrl && !alt && ((wP >= '1' && wP <= '8') || (wP >= VK_NUMPAD1 && wP <= VK_NUMPAD8))) {
+            forward_key_to_lister(d, wP, lP);
+            return 0;
+        }
         if (ctrl) {
             if (wP == 'M') { toggle_split_view(d); return 0; }
             if (wP == 'C') { SendMessageW(hwnd, WM_COPY, 0, 0); return 0; }
@@ -335,6 +348,11 @@ static LRESULT CALLBACK IEServerSubclassProc(HWND hwnd, UINT msg, WPARAM wP, LPA
 
     if (msg == WM_KEYDOWN) {
         int ctrl = GetKeyState(VK_CONTROL) & 0x8000;
+        int alt = GetKeyState(VK_MENU) & 0x8000;
+        if (!ctrl && !alt && ((wP >= '1' && wP <= '8') || (wP >= VK_NUMPAD1 && wP <= VK_NUMPAD8))) {
+            forward_key_to_lister(d, wP, lP);
+            return 0;
+        }
         if (ctrl) {
             switch (wP) {
             case VK_OEM_PLUS: case VK_ADD:
